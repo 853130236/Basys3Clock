@@ -1,0 +1,88 @@
+//  显示模块
+module show(
+  input CLK,
+  input [1:0] page,           //  具体显示年, 月日, 时分, 秒中的哪一页 
+  input [2:0] setType,        //  当setType!=0, 此时需要闪烁
+  input [2:0] timeTypeToSet,  //  具体设置年, 月, 日, 时, 分, 秒中的哪一位
+  output reg [3:0] partSelection,
+  output reg [7:0] positionSelection,
+  input [15:0] second,    
+  input [15:0] minute,    
+  input [15:0] hour,       
+  input [15:0] day,       
+  input [15:0] month,      
+  input [15:0] year 
+);
+  
+  reg [15:0] num;     //  要显示的数字
+  reg [12:0] count;
+  reg [1:0] sel;
+  reg [3:0] temp;
+  reg flash;          //  标志flash=1为闪缩状态
+  reg [25:0] countFlash;
+
+  initial begin
+    count = 0;
+    sel = 0;
+    flash = 0;
+    countFlash = 0;
+  end
+
+
+  always@(posedge CLK) begin
+    case(page)
+    2'B00: num = second;  
+    2'B01: begin num[7:0] = minute[7:0]; num[15:8] = hour[7:0]; end
+    2'B10: begin num[7:0] = day[7:0]; num[15:8] = month[7:0]; end
+    2'B11: num = year;
+    endcase
+    count = count + 1;
+    if (count == 5000) begin
+      count = 0;
+      sel = sel + 1;
+    end
+    if (sel == 4) begin
+      sel = 0;
+    end
+    case(sel)
+    2'B00: begin partSelection = 4'B1110; temp = num[3:0];   end    //  显示个位
+    2'B01: begin partSelection = 4'B1101; temp = num[7:4];   end    //  显示十位
+    2'B10: begin partSelection = 4'B1011; temp = num[11:8];  end    //  显示百位
+    2'B11: begin partSelection = 4'B0111; temp = num[15:12]; end    //  显示千位
+    endcase
+    
+    if (page == 2'B00) begin
+      partSelection[3:2] = 2'B11;
+    end
+
+    case(temp)
+    4'B0000: positionSelection = 8'B0000_0011;
+    4'B0001: positionSelection = 8'B1001_1111;
+    4'B0010: positionSelection = 8'B0010_0101;
+    4'B0011: positionSelection = 8'B0000_1101;
+    4'B0100: positionSelection = 8'B1001_1001;
+    4'B0101: positionSelection = 8'B0100_1001;
+    4'B0110: positionSelection = 8'B0100_0001;
+    4'B0111: positionSelection = 8'B0001_1111;
+    4'B1000: positionSelection = 8'B0000_0001;
+    4'B1001: positionSelection = 8'B0000_1001;
+    endcase
+    if (setType != 3'B000) begin
+      countFlash = countFlash + 1;
+      if (countFlash == 25_000000) begin
+        countFlash = 0;
+        flash = ~flash;
+      end
+      if (flash) begin
+        case(timeTypeToSet)
+        3'B000: partSelection = 4'B1111;
+        3'B001: partSelection[1:0] = 2'B11;
+        3'B010: partSelection[3:2] = 2'B11;
+        3'B011: partSelection[1:0] = 2'B11;
+        3'B100: partSelection[3:2] = 2'B11;
+        3'B101: partSelection = 4'B1111;
+        endcase
+      end
+    end   
+  end
+endmodule

@@ -1,0 +1,193 @@
+//  顶层模块
+
+`timescale 1ns / 1ps
+
+module myClock(
+  input CLK,
+  input [1:0] frequency,                //  00, 01, 10, 11的组合来选取不同大小的脉冲
+  input button_type,                    //  具体显示年, 月日, 时分, 秒中的哪一页 
+  input button_set,                     //  调时时用来切换  
+  input button_add,                     //  当按一下, 对应调时单位加一; 不是切换状态下按不动
+  output wire [3:0] partSelection,      //  4位数码管
+  output wire [7:0] positionSelection   //  8段数码管CA, CB...CG, DP
+);
+
+  reg [26:0] countMax;
+  reg [26:0] count;
+  reg [1:0] page;           //  共四页, 具体显示年, 月日, 时分, 秒中的哪一页 
+  reg pre_button_type;      //  上一个button_type
+  reg [2:0] setType;        //  具体调整哪一位, 0表示normal, 1~6表示调时(1表示当前位, 2表示下一位, 3表示下下位...)
+  reg [2:0] timeTypeToSet;     //  具体要设置的timeType, 0是秒, 1是分, ..., 5是年
+  reg pre_button_set;       //  上一个button_set
+  reg pre_button_add;       //  上一个button_add
+
+  /*
+    开辟一个16位的空间, 0~3存放个位的二进制数, 
+    4~7存放十位的二进制数, 8~11存放百位的二进制数, 
+    12~15存放千位的二进制数. 类似于BCD码   
+   */
+  reg [15:0] second;    
+  reg [15:0] minute;    
+  reg [15:0] hour;       
+  reg [15:0] day;       
+  reg [15:0] month;      
+  reg [15:0] year;      
+
+  initial begin
+    count = 0;      
+
+    pre_button_type = 0;
+    pre_button_set = 0;
+    pre_button_add = 0;
+
+    page = 0;
+    setType = 0;
+
+    second =  16'B0000_0000_0001_0000;     //  初始值是10
+    minute =  16'B0000_0000_0001_0101;     //  初始值是15
+    hour   =  16'B0000_0000_0001_0110;     //  初始值是16
+    day    =  16'B0000_0000_0010_0000;     //  初始值是20
+    month  =  16'B0000_0000_0001_0010;     //  初始值是12
+    year   =  16'B0010_0000_0001_0111;     //  初始值是2017
+  end
+
+  always@(posedge CLK) begin
+    case(frequency)
+    2'B00: countMax = 100_000000;
+    2'B01: countMax =  50_000000;
+    2'B10: countMax =  25_000000;
+    2'B11: countMax =  10_000000;
+    endcase
+
+    if (button_type != pre_button_type && !pre_button_type) begin    
+      if (page == 2'B11) begin
+        page = 2'B00;
+      end
+      else begin
+        page = page + 1;
+      end
+    end
+    
+    if (button_set != pre_button_set && !pre_button_set) begin
+      setType = setType + 1;
+      if (setType == 3'B111) begin
+        setType = 3'B000;
+      end
+      if (setType == 3'B001) begin       //  按一下, 当前位闪烁
+        case(page)
+          3'B000: timeTypeToSet = 3'B000;
+          3'B001: timeTypeToSet = 3'B001;
+          3'B010: timeTypeToSet = 3'B011;
+          3'B011: timeTypeToSet = 3'B101;
+        endcase
+      end
+      else begin
+        timeTypeToSet = timeTypeToSet + 1;
+        if (timeTypeToSet == 3'B110) begin
+          timeTypeToSet = 3'B000;
+        end
+        if (timeTypeToSet == 3'B000 || timeTypeToSet == 3'B001 || timeTypeToSet == 3'B011 || timeTypeToSet == 3'B101) begin         //  翻页
+          if (page == 2'B11) begin
+            page = 2'B00;
+          end
+          else begin
+            page = page + 1;   
+          end
+        end
+      end
+    end
+
+    if (setType != 3'B000 && button_add != pre_button_add && !pre_button_add) begin
+      case(timeTypeToSet)
+        3'B000: second = second + 1;
+        3'B001: minute = minute + 1;
+        3'B010: hour = hour + 1;
+        3'B011: day = day + 1;
+        3'B100: month = month + 1;
+        3'B101: year = year + 1;
+      endcase
+    end
+
+    pre_button_type = button_type;
+    pre_button_set = button_set;
+    pre_button_add = button_add;
+
+    if (setType == 3'B000) begin
+      count = count + 1;
+    end
+    if (count == countMax) begin              //  脉冲向秒钟转换
+      count = 0;
+      second[3:0] = second[3:0] + 1;
+    end
+    if (second[3:0] == 4'B1010) begin         //  秒钟个位向十位进位
+      second[3:0] = 4'B0000;
+      second[7:4] = second[7:4] + 1;
+    end
+    if (second[7:0] == 8'B0110_0000) begin    //  秒钟向分钟进位
+      second[7:0] = 8'B0000_0000;
+      minute[3:0] = minute[3:0] + 1;
+    end
+    if (minute[3:0] == 4'B1010) begin         //  分钟个位向十位进位
+      minute[3:0] = 4'B0000;
+      minute[7:4] = minute[7:4] + 1;
+    end
+    if (minute[7:0] == 8'B0110_0000) begin    //  分钟向时钟进位
+      minute[7:0] = 8'B0000_0000;
+      hour[3:0] = hour[3:0] + 1;
+    end
+    if (hour[3:0] == 4'B1010) begin           //  时钟个位向十位进位
+      hour[3:0] = 4'B0000;
+      hour[7:4] = hour[7:4] + 1;
+    end
+    if (hour[7:0] == 8'B0010_0100) begin      //  时钟向日期进位
+      hour[7:0] = 8'B0000_0000;
+      day[3:0] = day[3:0] + 1;
+    end
+    if (day[3:0] == 4'B1010) begin            //  日期个位向十位进位
+      day[3:0] = 4'B0000;
+      day[7:4] = day[7:4] + 1;
+    end
+    if (day[7:0] == 8'B0011_0001) begin       //  日期向月份进位
+      day[7:0] = 8'B0000_0001;
+      month[3:0] = month[3:0] + 1;
+    end
+    if (month[3:0] == 4'B1010) begin          //  月份个位向十位进位
+      month[3:0] = 4'B0001;
+      month[7:4] = month[7:4] + 1;
+    end
+    if (month[7:0] == 8'B0001_0011) begin     //  月份向年份进位
+      month[7:0] = 8'B0000_0001;
+      year[3:0] = year[3:0] + 1;
+    end
+    if (year[3:0] == 4'B1010) begin           //  年份个位向十位进位
+      year[3:0] = 4'B0000;
+      year[7:4] = year[7:4] + 1;
+    end
+    if (year[7:4] == 4'B1010) begin           //  年份十位向百位进位
+      year[7:4] = 4'B0000;
+      year[11:8] = year[11:8] + 1;
+    end
+    if (year[11:8] == 4'B1010) begin          //  年份百位向千位进位
+      year[11:8] = 4'B0000;
+      year[15:12] = year[15:12] + 1;
+    end
+    if (year[15:12] == 4'B1010) begin         //  年份达到最大值->0000
+      year[15:12] = 4'B0000;
+    end
+  end
+
+  show showTime(
+    .CLK(CLK), 
+    .page(page), 
+    .setType(setType), 
+    .timeTypeToSet(timeTypeToSet),
+    .partSelection(partSelection), 
+    .positionSelection(positionSelection), 
+    .second(second), 
+    .minute(minute), 
+    .hour(hour), 
+    .day(day), 
+    .month(month), 
+    .year(year)
+  );
+endmodule
